@@ -285,8 +285,9 @@ namespace OpenMD {
     statsMap_["PRESSURE_TENSOR"] =  PRESSURE_TENSOR;
 
     //stress tensor added
+    //?Is it stress tensor or virail tensor
     StatsData stress_tensor;
-    stress_tensor.units =  "amu/fs^2/A";
+    stress_tensor.units =  "kcal/mole";
     stress_tensor.title =  "Stress Tensor";
     stress_tensor.dataType = "Mat3x3d";
     stress_tensor.accumulator = new MatrixAccumulator();
