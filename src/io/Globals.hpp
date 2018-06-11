@@ -103,12 +103,13 @@ namespace OpenMD {
     DeclareParameter(ForceFieldFileName, std::string);
     DeclareParameter(SurfaceTension, RealType);
     DeclareParameter(PrintPressureTensor, bool);
-    DeclareParameter(PrintStressTensor, bool);
+    DeclareParameter(PrintVirialTensor, bool);
     DeclareParameter(PrintHeatFlux, bool);
     DeclareParameter(TaggedAtomPair, intPair);
     DeclareParameter(PrintTaggedPairDistance, bool);
     DeclareParameter(ElectrostaticSummationMethod, std::string);
     DeclareParameter(ElectrostaticScreeningMethod, std::string);
+    DeclareParameter(UseSurfaceTerm, bool);
     DeclareParameter(DampingAlpha, RealType);
     DeclareParameter(Dielectric, RealType);
     DeclareParameter(CutoffMethod, std::string);

@@ -92,6 +92,7 @@ namespace OpenMD {
     bool doHeatFlux_;
     bool doLongRangeCorrections_;
     bool usePeriodicBoundaryConditions_;
+    bool useSurfaceTerm_;
 
     virtual void setupCutoffs();
     virtual void preCalculation();        
@@ -129,7 +130,7 @@ namespace OpenMD {
     vector<RealType> vdwScale_;
     vector<RealType> electrostaticScale_;
 
-    Mat3x3d stressTensor;
+    Mat3x3d virialTensor;
 
     vector<Perturbation*> perturbations_;
 

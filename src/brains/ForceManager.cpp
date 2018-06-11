@@ -69,7 +69,9 @@ using namespace std;
 namespace OpenMD {
 
   ForceManager::ForceManager(SimInfo * info) : initialized_(false), info_(info),
-                                               switcher_(NULL), seleMan_(info), evaluator_(info) {
+                                               switcher_(NULL),
+                                               seleMan_(info),
+                                               evaluator_(info) {
     forceField_ = info_->getForceField();
     interactionMan_ = new InteractionManager();
     fDecomp_ = new ForceMatrixDecomposition(info_, interactionMan_);
@@ -227,6 +229,7 @@ namespace OpenMD {
             cutoffMethod_ = TAYLOR_SHIFTED;
           } else if (myMethod == "EWALD_FULL") {
             cutoffMethod_ = EWALD_FULL;
+            useSurfaceTerm_ = true;
           }
 
           if (simParams_->haveSwitchingRadius())
@@ -270,7 +273,7 @@ namespace OpenMD {
         }
       }
     }
-
+    
     // create the switching function object:
 
     switcher_ = new SwitchingFunction();
@@ -357,6 +360,8 @@ namespace OpenMD {
       interactionMan_->setSimInfo(info_);
       interactionMan_->initialize();
 
+      useSurfaceTerm_ = false;  // default, can be set by Ewald or directly
+
       //! We want to delay the cutoffs until after the interaction
       //! manager has set up the atom-atom interactions so that we can
       //! query them for suggested cutoff values
@@ -370,7 +375,9 @@ namespace OpenMD {
 
       doElectricField_ = info_->getSimParams()->getOutputElectricField();
       doSitePotential_ = info_->getSimParams()->getOutputSitePotential();
-
+      if (info_->getSimParams()->haveUseSurfaceTerm()) {
+        useSurfaceTerm_ = info_->getSimParams()->getUseSurfaceTerm();
+      }
     }
 
     ForceFieldOptions& fopts = forceField_->getForceFieldOptions();
@@ -490,8 +497,8 @@ namespace OpenMD {
       }
     }
 
-    // Zero out the stress tensor
-    stressTensor *= 0.0;
+    // Zero out the virial tensor
+    virialTensor *= 0.0;
     // Zero out the heatFlux
     fDecomp_->setHeatFlux( Vector3d(0.0) );
 
@@ -772,6 +779,7 @@ namespace OpenMD {
 
       if (iLoop == loopStart) {
         bool update_nlist = fDecomp_->checkNeighborList();
+        
         if (update_nlist) {
           if (!usePeriodicBoundaryConditions_)
             Mat3x3d bbox = thermo->getBoundingBox();
@@ -871,7 +879,7 @@ namespace OpenMD {
                     fDecomp_->unpackInteractionData(idat, atom1, atom2);
                     vij += vpair;
                     fij += f1;
-                    stressTensor -= outProduct( *(idat.d), f1);
+                    virialTensor -= outProduct( *(idat.d), f1);
                     if (doHeatFlux_)
                       fDecomp_->addToHeatFlux(*(idat.d) * dot(f1, vel2));
                   }
@@ -889,9 +897,9 @@ namespace OpenMD {
                   if (!fDecomp_->skipAtomPair(atomListRow[0],
                                               atomListColumn[0],
                                               cg1, cg2)) {
-                  stressTensor -= outProduct( *(idat.d), fg);
-                  if (doHeatFlux_)
-                    fDecomp_->addToHeatFlux(*(idat.d) * dot(fg, vel2));
+                    virialTensor -= outProduct( *(idat.d), fg);
+                    if (doHeatFlux_)
+                      fDecomp_->addToHeatFlux(*(idat.d) * dot(fg, vel2));
                   }
                 }
 
@@ -908,7 +916,7 @@ namespace OpenMD {
                       // find the distance between the atom
                       // and the center of the cutoff group:
                       dag = fDecomp_->getAtomToGroupVectorRow(atom1, cg1);
-                      stressTensor -= outProduct(dag, fg);
+                      virialTensor -= outProduct(dag, fg);
                       if (doHeatFlux_)
                         fDecomp_->addToHeatFlux( dag * dot(fg, vel2));
                     }
@@ -928,7 +936,7 @@ namespace OpenMD {
                       // find the distance between the atom
                       // and the center of the cutoff group:
                       dag = fDecomp_->getAtomToGroupVectorColumn(atom2, cg2);
-                      stressTensor -= outProduct(dag, fg);
+                      virialTensor -= outProduct(dag, fg);
                       if (doHeatFlux_)
                         fDecomp_->addToHeatFlux( dag * dot(fg, vel2));
                     }
@@ -936,7 +944,7 @@ namespace OpenMD {
                 }
               }
               //if (!info_->usesAtomicVirial()) {
-              //  stressTensor -= outProduct(d_grp, fij);
+              //  virialTensor -= outProduct(d_grp, fij);
               //  if (doHeatFlux_)
               //     fDecomp_->addToHeatFlux( d_grp * dot(fij, vel2));
               //}
@@ -973,7 +981,9 @@ namespace OpenMD {
       interactionMan_->doReciprocalSpaceSum(reciprocalPotential);
       curSnapshot->setReciprocalPotential(reciprocalPotential);
 
-      // interactionMan_->doSurfaceTerm(surfacePotential);
+      if (useSurfaceTerm_) {
+        interactionMan_->doSurfaceTerm(surfacePotential);
+      }
       curSnapshot->setSurfacePotential(surfacePotential);
     }
 
@@ -1028,16 +1038,16 @@ namespace OpenMD {
       for (rb = mol->beginRigidBody(rbIter); rb != NULL;
            rb = mol->nextRigidBody(rbIter)) {
         Mat3x3d rbTau = rb->calcForcesAndTorquesAndVirial();
-        stressTensor += rbTau;
+        virialTensor += rbTau;
       }
     }
 
 #ifdef IS_MPI
-    MPI_Allreduce(MPI_IN_PLACE, stressTensor.getArrayPointer(), 9,
+    MPI_Allreduce(MPI_IN_PLACE, virialTensor.getArrayPointer(), 9,
                   MPI_REALTYPE, MPI_SUM, MPI_COMM_WORLD);
 #endif
 
-    curSnapshot->setStressTensor(stressTensor);
+    curSnapshot->setVirialTensor(virialTensor);
 
     if (info_->getSimParams()->getUseLongRangeCorrections()) {
       /*
@@ -1070,8 +1080,8 @@ namespace OpenMD {
 
         RealType lrp = curSnapshot->getLongRangePotential();
         curSnapshot->setLongRangePotential(lrp + Elrc);
-        stressTensor += Wlrc * SquareMatrix3<RealType>::identity();
-        curSnapshot->setStressTensor(stressTensor);
+        virialTensor += Wlrc * SquareMatrix3<RealType>::identity();
+        curSnapshot->setVirialTensor(virialTensor);
       */
 
     }
@@ -1087,7 +1097,6 @@ namespace OpenMD {
   
   void ForceManager::selectedPreCalculation(Molecule* mol1, Molecule* mol2) {
     SimInfo::MoleculeIterator mi;
-    Molecule* mol;
     Molecule::AtomIterator ai;
     Atom* atom;
     Molecule::RigidBodyIterator rbIter;
@@ -1134,7 +1143,7 @@ namespace OpenMD {
 
     // Next we zero out for mol2
     for(atom = mol2->beginAtom(ai); atom != NULL;
-	atom = mol->nextAtom(ai)){
+	atom = mol2->nextAtom(ai)){
       atom->zeroForcesAndTorques();
     }
     //change the positions of atoms which belong to the rigidbodies
@@ -1150,8 +1159,8 @@ namespace OpenMD {
       }
     }
       
-    // Zero out the stress tensor
-    stressTensor *= 0.0;
+    // Zero out the virial tensor
+    virialTensor *= 0.0;
     // Zero out the heatFlux
     fDecomp_->setHeatFlux( Vector3d(0.0) );
   }
@@ -1538,7 +1547,7 @@ namespace OpenMD {
       if (iLoop == loopStart) {
         bool update_nlist = fDecomp_->checkNeighborList();
 
-  if (update_nlist) {
+        if (update_nlist) {
           if (!usePeriodicBoundaryConditions_)
             Mat3x3d bbox = thermo->getBoundingBox();
           fDecomp_->buildNeighborList(neighborList_, point_);
@@ -1637,7 +1646,7 @@ namespace OpenMD {
                     fDecomp_->unpackInteractionData(idat, atom1, atom2);
                     vij += vpair;
                     fij += f1;
-                    stressTensor -= outProduct( *(idat.d), f1);
+                    virialTensor -= outProduct( *(idat.d), f1);
                     if (doHeatFlux_)
                       fDecomp_->addToHeatFlux(*(idat.d) * dot(f1, vel2));
                   }
@@ -1655,9 +1664,9 @@ namespace OpenMD {
                   if (!fDecomp_->skipAtomPair(atomListRow[0],
                                               atomListColumn[0],
                                               cg1, cg2)) {
-                  stressTensor -= outProduct( *(idat.d), fg);
-                  if (doHeatFlux_)
-                    fDecomp_->addToHeatFlux(*(idat.d) * dot(fg, vel2));
+                    virialTensor -= outProduct( *(idat.d), fg);
+                    if (doHeatFlux_)
+                      fDecomp_->addToHeatFlux(*(idat.d) * dot(fg, vel2));
                   }
                 }
 
@@ -1674,7 +1683,7 @@ namespace OpenMD {
                       // find the distance between the atom
                       // and the center of the cutoff group:
                       dag = fDecomp_->getAtomToGroupVectorRow(atom1, cg1);
-                      stressTensor -= outProduct(dag, fg);
+                      virialTensor -= outProduct(dag, fg);
                       if (doHeatFlux_)
                         fDecomp_->addToHeatFlux( dag * dot(fg, vel2));
                     }
@@ -1694,7 +1703,7 @@ namespace OpenMD {
                       // find the distance between the atom
                       // and the center of the cutoff group:
                       dag = fDecomp_->getAtomToGroupVectorColumn(atom2, cg2);
-                      stressTensor -= outProduct(dag, fg);
+                      virialTensor -= outProduct(dag, fg);
                       if (doHeatFlux_)
                         fDecomp_->addToHeatFlux( dag * dot(fg, vel2));
                     }
@@ -1702,7 +1711,7 @@ namespace OpenMD {
                 }
               }
               //if (!info_->usesAtomicVirial()) {
-              //  stressTensor -= outProduct(d_grp, fij);
+              //  virialTensor -= outProduct(d_grp, fij);
               //  if (doHeatFlux_)
               //     fDecomp_->addToHeatFlux( d_grp * dot(fij, vel2));
               //}
@@ -1790,20 +1799,20 @@ namespace OpenMD {
     for (rb = mol1->beginRigidBody(rbIter); rb != NULL;
 	 rb = mol1->nextRigidBody(rbIter)) {
       Mat3x3d rbTau = rb->calcForcesAndTorquesAndVirial();
-      stressTensor += rbTau;
+      virialTensor += rbTau;
     }
 
     for (rb = mol2->beginRigidBody(rbIter); rb != NULL;
 	 rb = mol2->nextRigidBody(rbIter)) {
       Mat3x3d rbTau = rb->calcForcesAndTorquesAndVirial();
-      stressTensor += rbTau;
+      virialTensor += rbTau;
     }
 
 #ifdef IS_MPI
-    MPI_Allreduce(MPI_IN_PLACE, stressTensor.getArrayPointer(), 9,
+    MPI_Allreduce(MPI_IN_PLACE, virialTensor.getArrayPointer(), 9,
                   MPI_REALTYPE, MPI_SUM, MPI_COMM_WORLD);
 #endif
-    curSnapshot->setStressTensor(stressTensor);
+    curSnapshot->setVirialTensor(virialTensor);
 
     if (info_->getSimParams()->getUseLongRangeCorrections()) {
       /*
@@ -1836,8 +1845,8 @@ namespace OpenMD {
 
         RealType lrp = curSnapshot->getLongRangePotential();
         curSnapshot->setLongRangePotential(lrp + Elrc);
-        stressTensor += Wlrc * SquareMatrix3<RealType>::identity();
-        curSnapshot->setStressTensor(stressTensor);
+        virialTensor += Wlrc * SquareMatrix3<RealType>::identity();
+        curSnapshot->setVirialTensor(virialTensor);
       */
 
     }
