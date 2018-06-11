@@ -284,17 +284,6 @@ namespace OpenMD {
     data_[PRESSURE_TENSOR] = pressure_tensor;
     statsMap_["PRESSURE_TENSOR"] =  PRESSURE_TENSOR;
 
-<<<<<<< HEAD
-    //stress tensor added
-    //?Is it stress tensor or virail tensor
-    StatsData stress_tensor;
-    stress_tensor.units =  "kcal/mole";
-    stress_tensor.title =  "Stress Tensor";
-    stress_tensor.dataType = "Mat3x3d";
-    stress_tensor.accumulator = new MatrixAccumulator();
-    data_[STRESS_TENSOR] = stress_tensor;
-    statsMap_["STRESS_TENSOR"] =  STRESS_TENSOR;
-=======
     //virial tensor added
     StatsData virial_tensor;
     virial_tensor.units =  "kcal/mol";
@@ -303,7 +292,6 @@ namespace OpenMD {
     virial_tensor.accumulator = new MatrixAccumulator();
     data_[VIRIAL_TENSOR] = virial_tensor;
     statsMap_["VIRIAL_TENSOR"] =  VIRIAL_TENSOR;
->>>>>>> c41da59f46c28421930c8ad34c33bc00007382cc
 
     StatsData system_dipole;
     system_dipole.units =  "C m";
@@ -431,7 +419,7 @@ namespace OpenMD {
 	simParams->getPrintPressureTensor()){
       statsMask_.set(PRESSURE_TENSOR);
     }
-    
+
     if (simParams->havePrintVirialTensor() &&
         simParams->getPrintVirialTensor()){
       statsMask_.set(VIRIAL_TENSOR);
