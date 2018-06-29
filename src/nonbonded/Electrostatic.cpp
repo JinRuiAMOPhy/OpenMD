@@ -657,6 +657,7 @@ namespace OpenMD {
 
     if (fqa.isFluctuatingCharge()) {
       electrostaticAtomData.is_Fluctuating = true;
+      electrostaticAtomData.uses_SlaterJ = fqa.usesSlaterElectrostatics();
       electrostaticAtomData.electronegativity = fqa.getElectronegativity();
       electrostaticAtomData.hardness = fqa.getHardness();
       electrostaticAtomData.slaterN = fqa.getSlaterN();
@@ -766,11 +767,15 @@ namespace OpenMD {
       a_is_Dipole = data1.is_Dipole;
       a_is_Quadrupole = data1.is_Quadrupole;
       a_is_Fluctuating = data1.is_Fluctuating;
+      a_uses_Slater = data1.uses_SlaterJ;
+
     } else {
       a_is_Charge = false;
       a_is_Dipole = false;
       a_is_Quadrupole = false;
       a_is_Fluctuating = false;
+      a_uses_Slater = false;
+
     }
     if (Etids[idat.atid2] != -1) { 
       data2 = ElectrostaticMap[Etids[idat.atid2]];
@@ -778,11 +783,14 @@ namespace OpenMD {
       b_is_Dipole = data2.is_Dipole;
       b_is_Quadrupole = data2.is_Quadrupole;
       b_is_Fluctuating = data2.is_Fluctuating;
+      b_uses_Slater = data2.uses_SlaterJ;
+
     } else {
       b_is_Charge = false;
       b_is_Dipole = false;
       b_is_Quadrupole = false;
       b_is_Fluctuating = false;
+      b_uses_Slater = false;
     }
 
     U = 0.0;  // Potential
@@ -812,10 +820,19 @@ namespace OpenMD {
       
     // Obtain all of the required radial function values from the
     // spline structures:
-    
+
+    if (((a_is_Fluctuating || b_is_Fluctuating) && idat.excluded) ||
+        (a_uses_Slater && b_uses_Slater)) {
+      J = Jij[FQtids[idat.atid1]][FQtids[idat.atid2]];
+    }    
+        
     // needed for fields (and forces):
     if (a_is_Charge || b_is_Charge) {
-      v01s->getValueAndDerivativeAt( *(idat.rij), v01, dv01);
+      if (a_uses_Slater && b_uses_Slater) {
+        J->getValueAndDerivativeAt( *(idat.rij), v01, dv01);
+      } else {
+        v01s->getValueAndDerivativeAt( *(idat.rij), v01, dv01);
+      }
     }
     if (a_is_Dipole || b_is_Dipole) {
       v11s->getValueAndDerivativeAt( *(idat.rij), v11, dv11);
@@ -927,18 +944,14 @@ namespace OpenMD {
       }
     }
         
-
-    if ((a_is_Fluctuating || b_is_Fluctuating) && idat.excluded) {
-      J = Jij[FQtids[idat.atid1]][FQtids[idat.atid2]];
-    }    
-
     if (a_is_Charge) {     
       
       if (b_is_Charge) {
-        pref =  pre11_ * *(idat.electroMult);      
+        
+        pref =  pre11_ * *(idat.electroMult);        
         U  += C_a * C_b * pref * v01;
         F  += C_a * C_b * pref * dv01 * rhat;
-
+        
         // If this is an excluded pair, there are still indirect
         // interactions via the reaction field we must worry about:
 
@@ -1181,7 +1194,7 @@ namespace OpenMD {
     bool i_is_Quadrupole = data.is_Quadrupole;
     bool i_is_Fluctuating = data.is_Fluctuating;
     RealType C_a = data.fixedCharge;   
-    RealType self(0.0), preVal, DdD(0.0), trQ, trQQ;
+    RealType selfPot(0.0), fqf(0.0), preVal, DdD(0.0), trQ, trQQ;
 
     if (i_is_Dipole) {
       DdD = data.dipole.lengthSquare();
@@ -1190,9 +1203,8 @@ namespace OpenMD {
     if (i_is_Fluctuating) {
       C_a += *(sdat.flucQ);
 
-      flucQ_->getSelfInteraction(sdat.atid, *(sdat.flucQ),  
-                                 (*(sdat.selfPot))[ELECTROSTATIC_FAMILY], 
-                                 *(sdat.flucQfrc) );
+      flucQ_->getSelfInteraction(sdat.atid, *(sdat.flucQ), selfPot, fqf );
+      
     }
 
     switch (summationMethod_) {
@@ -1203,16 +1215,16 @@ namespace OpenMD {
         // Molecular Dynamics Simulation with Friedman’s Image Charge
         // Method," J. Phys. Chem. 99, 12001-12007 (1995).]
         preVal = pre11_ * preRF_ * C_a * C_a;
-        (*(sdat.selfPot))[ELECTROSTATIC_FAMILY] -= 0.5 * preVal / cutoffRadius_;
+        selfPot -= 0.5 * preVal / cutoffRadius_;
         if (i_is_Fluctuating) {
-          *(sdat.flucQfrc) += pre11_ * preRF_ * C_a / cutoffRadius_;
+          fqf += pre11_ * preRF_ * C_a / cutoffRadius_;
         }
         if (sdat.isSelected)
           (*(sdat.selePot))[ELECTROSTATIC_FAMILY]-= 0.5 * preVal / cutoffRadius_; 
       }
 
       if (i_is_Dipole) {
-        (*(sdat.selfPot))[ELECTROSTATIC_FAMILY] -= pre22_ * preRF_ * DdD;
+        selfPot -= pre22_ * preRF_ * DdD;
         if (sdat.isSelected)
           (*(sdat.selePot))[ELECTROSTATIC_FAMILY] -= pre22_ * preRF_ * DdD;
       }
@@ -1224,35 +1236,39 @@ namespace OpenMD {
     case esm_TAYLOR_SHIFTED:
     case esm_EWALD_FULL:
       if (i_is_Charge) {
-        self += selfMult1_ * pre11_ * C_a * (C_a + *(sdat.skippedCharge));        
+        selfPot += selfMult1_ * pre11_ * C_a * (C_a + *(sdat.skippedCharge));        
         if (i_is_Fluctuating) {
-          *(sdat.flucQfrc) -= selfMult1_*pre11_*(2.0*C_a + *(sdat.skippedCharge));
+          // fqf -= selfMult1_*pre11_*(2.0*C_a + *(sdat.skippedCharge));
+          // If the surface of the cutoff sphere is only the net charge:
+          fqf -= selfMult1_ * pre11_ * (C_a + *(sdat.skippedCharge));
         }
       }
       if (i_is_Dipole) 
-        self += selfMult2_ * pre22_ * DdD;      
+        selfPot += selfMult2_ * pre22_ * DdD;      
       if (i_is_Quadrupole) {
         trQ = data.quadrupole.trace();
         trQQ = (data.quadrupole * data.quadrupole).trace();
-        self += selfMult4_ * pre44_ * (2.0*trQQ + trQ*trQ);
+        selfPot += selfMult4_ * pre44_ * (2.0*trQQ + trQ*trQ);
         if (i_is_Charge) {
-          self -= selfMult2_ * pre14_ * 2.0 * C_a * trQ;
+          selfPot -= selfMult2_ * pre14_ * 2.0 * C_a * trQ;
           if (i_is_Fluctuating) {
-            *(sdat.flucQfrc) += selfMult2_ * pre14_ * 2.0 * trQ;
+            fqf += selfMult2_ * pre14_ * 2.0 * trQ;
           }
         }
       }
-
-
-      
-      (*(sdat.selfPot))[ELECTROSTATIC_FAMILY] += self;
-      if (sdat.isSelected)
-        (*(sdat.selePot))[ELECTROSTATIC_FAMILY] += self;
-
       break;
     default:
       break;
     }
+   
+    (*(sdat.selfPot))[ELECTROSTATIC_FAMILY] += selfPot;
+
+    if (sdat.isSelected)
+      (*(sdat.selePot))[ELECTROSTATIC_FAMILY] += selfPot;
+    
+    if (i_is_Fluctuating)
+      *(sdat.flucQfrc) += fqf;
+
   }
 
 
