@@ -354,8 +354,8 @@ src/optimization/EndCriteria.cpp
 src/optimization/LineSearch.cpp
 src/optimization/LineSearchBasedMethod.cpp
 src/optimization/SteepestDescent.cpp
-src/optimization/PotentialEnergyObjectiveFunction.cpp
 src/optimization/MinimizerParameters.cpp
+src/optimization/Problem.cpp
 src/nonbonded/Buckingham.cpp
 src/nonbonded/EAM.cpp
 src/nonbonded/GB.cpp
@@ -380,8 +380,6 @@ src/primitives/StuntDouble.cpp
 src/primitives/ShortRangeInteraction.cpp
 src/primitives/Torsion.cpp
 src/primitives/UreyBradleyBend.cpp
-src/perturbations/UniformField.cpp
-src/perturbations/UniformGradient.cpp
 src/restraints/MolecularRestraint.cpp
 src/restraints/ObjectRestraint.cpp
 src/selection/HullFinder.cpp
@@ -477,8 +475,11 @@ src/io/ZConsWriter.cpp
 src/io/ifstrstream.cpp
 src/math/ParallelRandNumGen.cpp
 src/nonbonded/Electrostatic.cpp
+src/optimization/PotentialEnergyObjectiveFunction.cpp
 src/parallel/ForceDecomposition.cpp
 src/parallel/ForceMatrixDecomposition.cpp
+src/perturbations/UniformField.cpp
+src/perturbations/UniformGradient.cpp
 src/restraints/RestraintForceManager.cpp
 src/restraints/ThermoIntegrationForceManager.cpp
 src/selection/DistanceFinder.cpp
@@ -487,7 +488,6 @@ src/selection/SelectionSet.cpp
 src/utils/ProgressBar.cpp
 src/utils/simError.cpp
 src/utils/OpenMDBitSet.cpp
-src/optimization/Problem.cpp
 )
 
 IF(ZLIB_FOUND)

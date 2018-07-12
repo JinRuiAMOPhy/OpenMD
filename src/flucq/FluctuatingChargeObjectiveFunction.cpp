@@ -41,6 +41,9 @@
  */
 
 #include "flucq/FluctuatingChargeObjectiveFunction.hpp"
+#ifdef IS_MPI
+#include "mpi.h"
+#endif
 
 namespace OpenMD{
   
@@ -54,9 +57,7 @@ namespace OpenMD{
     setCoor(x);
     forceMan_->calcForces();
     fqConstraints_->applyConstraints();
-
-    RealType pot = thermo.getPotential();
-    return pot;
+    return thermo.getPotential();
   }
   
   void FluctuatingChargeObjectiveFunction::gradient(DynamicVector<RealType>& grad, const DynamicVector<RealType>& x) {
@@ -64,21 +65,17 @@ namespace OpenMD{
     setCoor(x);         
     forceMan_->calcForces(); 
     fqConstraints_->applyConstraints();
-
     getGrad(grad);
   }
   
   RealType FluctuatingChargeObjectiveFunction::valueAndGradient(DynamicVector<RealType>& grad,
                                                                 const DynamicVector<RealType>& x) {
 
-    setCoor(x);     
+    setCoor(x);
     forceMan_->calcForces();
-    fqConstraints_->applyConstraints();
-    
+    fqConstraints_->applyConstraints();    
     getGrad(grad); 
-
-    RealType pot = thermo.getPotential();
-    return pot;
+    return thermo.getPotential();
   }
   
   void FluctuatingChargeObjectiveFunction::setCoor(const DynamicVector<RealType> &x) const {
@@ -86,68 +83,123 @@ namespace OpenMD{
     Molecule::FluctuatingChargeIterator  j;
     Molecule* mol;
     Atom* atom;
-    int index = 0;
 
     info_->getSnapshotManager()->advance();
-    
+
+    int index;
+#ifdef IS_MPI
+    index = displacements_[myrank_];
+#else
+    index = 0;
+#endif               
+      
     for (mol = info_->beginMolecule(i); mol != NULL; 
          mol = info_->nextMolecule(i)) {
-      
+
       for (atom = mol->beginFluctuatingCharge(j); atom != NULL;
            atom = mol->nextFluctuatingCharge(j)) {
-       
         atom->setFlucQPos(x[index++]);
       }
-    }    
+    }
   }
   
   void FluctuatingChargeObjectiveFunction::getGrad(DynamicVector<RealType> &grad) {
+    
     SimInfo::MoleculeIterator i;
     Molecule::FluctuatingChargeIterator  j;
     Molecule* mol;
-    Atom* atom;
+    Atom* atom;       
+    grad.setZero();
     
-    int index = 0;
-    
+    int index;
+#ifdef IS_MPI
+    index = displacements_[myrank_];
+#else
+    index = 0;
+#endif               
+
     for (mol = info_->beginMolecule(i); mol != NULL; 
          mol = info_->nextMolecule(i)) {
 
       for (atom = mol->beginFluctuatingCharge(j); atom != NULL;
            atom = mol->nextFluctuatingCharge(j)) {
-
         grad[index++] = -atom->getFlucQFrc();
       }
     }
-  }
+
+#ifdef IS_MPI
+    MPI_Allreduce(MPI_IN_PLACE, &grad[0], nFlucQ_, MPI_REALTYPE, MPI_SUM,
+                  MPI_COMM_WORLD);
+#endif
+    
+  } 
 
   DynamicVector<RealType> FluctuatingChargeObjectiveFunction::setInitialCoords() {
+#ifdef IS_MPI        
+    MPI_Comm_size( MPI_COMM_WORLD, &nproc_);
+    MPI_Comm_rank( MPI_COMM_WORLD, &myrank_);
+    std::vector<int> flucqOnProc_(nproc_, 0);
+
+    displacements_.clear();    
+    displacements_.resize(nproc_, 0);
+#endif
+    
     SimInfo::MoleculeIterator i;
     Molecule::FluctuatingChargeIterator  j;
     Molecule* mol;
     Atom* atom;
-    
-    int index = 0;    
+
+    nFlucQ_ = 0;
+   
     for (mol = info_->beginMolecule(i); mol != NULL; 
          mol = info_->nextMolecule(i)) {
 
       for (atom = mol->beginFluctuatingCharge(j); atom != NULL;
            atom = mol->nextFluctuatingCharge(j)) {
         
-        index++;
+        nFlucQ_++;
       }
     }
 
-    DynamicVector<RealType> initCoords(index);
+#ifdef IS_MPI
+    MPI_Allgather(&nFlucQ_, 1, MPI_INT, &flucqOnProc_[0],
+                  1, MPI_INT, MPI_COMM_WORLD);
+
+    nFlucQ_ = 0;        
+    for (int iproc = 0; iproc < nproc_; iproc++){
+      nFlucQ_ += flucqOnProc_[iproc];
+    }
+    
+    displacements_[0] = 0;    
+    for (int iproc = 1; iproc < nproc_; iproc++){
+      displacements_[iproc] = displacements_[iproc-1] + flucqOnProc_[iproc-1];
+    }
+#endif
+
+    DynamicVector<RealType> initCoords(nFlucQ_);
+    
+    int index;
+#ifdef IS_MPI
+    index = displacements_[myrank_];
+#else
     index = 0;
+#endif               
+    
     for (mol = info_->beginMolecule(i); mol != NULL; 
          mol = info_->nextMolecule(i)) {
 
       for (atom = mol->beginFluctuatingCharge(j); atom != NULL;
            atom = mol->nextFluctuatingCharge(j)) {
-        
         initCoords[index++] = atom->getFlucQPos();
       }
-    }   
+    }
+
+#ifdef IS_MPI
+    MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, &initCoords[0],
+                   &flucqOnProc_[0], &displacements_[0],
+                   MPI_REALTYPE, MPI_COMM_WORLD);
+#endif
+    
     return initCoords;
   }
 }

@@ -633,6 +633,7 @@ namespace OpenMD {
     electrostaticAtomData.is_Dipole = false;
     electrostaticAtomData.is_Quadrupole = false;
     electrostaticAtomData.is_Fluctuating = false;
+    electrostaticAtomData.uses_SlaterJ = false;
 
     FixedChargeAdapter fca = FixedChargeAdapter(atomType);
 
@@ -717,7 +718,7 @@ namespace OpenMD {
         RealType dr = (cutoffRadius_ + 2.0) / RealType(np_ - 1);
         vector<RealType> rvals;
         vector<RealType> Jvals;
-        RealType j0, j0c, j1c;
+        // RealType j0, j0c, j1c;
         // don't start at i = 0, as rval = 0 is undefined for the
         // slater overlap integrals.
         for (int i = 1; i < np_+1; i++) {
@@ -730,7 +731,6 @@ namespace OpenMD {
           // j0c = sSTOCoulInt( a, b, m, n,
           //                    cutoffRadius_ * Constants::angstromToBohr ) * 
           //   Constants::hartreeToKcal;
-
           // j1c = sSTOCoulIntGrad( a, b, m, n,
           //                        cutoffRadius_ * Constants::angstromToBohr ) *
           //   Constants::hartreeToKcal;
@@ -1182,7 +1182,7 @@ namespace OpenMD {
 
       if (b_is_Dipole || b_is_Quadrupole) 
         *(idat.t2) += Tb * *(idat.sw);
-      
+
     } else {
 
       // only accumulate the forces and torques resulting from the
@@ -1224,9 +1224,9 @@ namespace OpenMD {
         
     if (i_is_Fluctuating) {
       // We're now doing all of the self pieces for fluctuating charges in
-      // explicit self interactions.=
+      // explicit self interactions.
       // C_a += *(sdat.flucQ);
-      flucQ_->getSelfInteraction(sdat.atid, *(sdat.flucQ), selfPot, fqf );      
+      flucQ_->getSelfInteraction(sdat.atid, *(sdat.flucQ), selfPot, fqf );
     }
 
     switch (summationMethod_) {
@@ -1241,14 +1241,10 @@ namespace OpenMD {
         //if (i_is_Fluctuating) {
         //  fqf += pre11_ * preRF_ * C_a / cutoffRadius_;
         //}
-        if (sdat.isSelected)
-          (*(sdat.selePot))[ELECTROSTATIC_FAMILY]-= 0.5 * preVal / cutoffRadius_; 
       }
 
       if (i_is_Dipole) {
         selfPot -= pre22_ * preRF_ * DdD;
-        if (sdat.isSelected)
-          (*(sdat.selePot))[ELECTROSTATIC_FAMILY] -= pre22_ * preRF_ * DdD;
       }
       
       break;
